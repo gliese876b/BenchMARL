@@ -16,11 +16,20 @@ from torchrl.envs import (
     EnvBase,
     FlattenObservation,
     Transform,
+    ExcludeTransform
 )
 
 from benchmarl.environments.common import Task, TaskClass
 from benchmarl.utils import DEVICE_TYPING
 
+from torchrl.envs.utils import MarlGroupMapType
+
+from .custom_wrapper import MeltingpotCustomEnv
+from .inequity_aversion import MeltingpotIAEnv
+from .social_value_orientation import MeltingpotSVOEnv
+
+from .fair_local_inequity_aversion import MeltingpotFairLocalIAEnv
+from .fair_local_social_value_orientation import MeltingpotFairLocalSVOEnv
 
 class MeltingPotClass(TaskClass):
     def get_env_fun(
@@ -34,10 +43,91 @@ class MeltingPotClass(TaskClass):
 
         config = copy.deepcopy(self.config)
 
-        return lambda: MeltingpotEnv(
+        inequity_aversion = config.pop("inequity_aversion", False)
+        social_value_orientation = config.pop("social_value_orientation", False)
+
+        fair_local_svo = config.pop("fair_local_svo", False)
+        fair_local_ia = config.pop("fair_local_ia", False)
+
+        if inequity_aversion:
+            ia_alpha = config.pop("ia_alpha", 0)
+            ia_beta = config.pop("ia_beta", 0)
+            ia_lambda = config.pop("ia_lambda", 0)
+            ia_gamma = config.pop("ia_gamma", 0)
+
+            # builds the same substrate but wraps it with the version that applies inequity aversion
+            return lambda: MeltingpotIAEnv(
+                substrate=self.name.lower().replace('_ia', ''),
+                categorical_actions=True,
+                device=device,
+                group_map=MarlGroupMapType.ONE_GROUP_PER_AGENT,
+                ia_alpha=ia_alpha,
+                ia_beta=ia_beta,
+                ia_lambda=ia_lambda,
+                ia_gamma=ia_gamma,
+                **config,
+            )
+        elif social_value_orientation:
+            svo_weight = config.pop("svo_weight", 0)
+            target_svos = config.pop("target_svos", [0])
+            svo_lambda = config.pop("svo_lambda", 0)
+            svo_gamma = config.pop("svo_gamma", 0)
+
+            # builds the same substrate but wraps it with the version that applies social value orientation
+            return lambda: MeltingpotSVOEnv(
+                substrate=self.name.lower().replace('_svo', ''),
+                categorical_actions=True,
+                device=device,
+                group_map=MarlGroupMapType.ONE_GROUP_PER_AGENT,
+                svo_weight=svo_weight,
+                target_svos=target_svos,
+                svo_lambda=svo_lambda,
+                svo_gamma=svo_gamma,
+                **config,
+            )
+        elif fair_local_svo:
+            svo_weight = config.pop("svo_weight", 0)
+            target_svos = config.pop("target_svos", [0])
+            svo_lambda = config.pop("svo_lambda", 0)
+            svo_gamma = config.pop("svo_gamma", 0)
+            social_drive_modifiers = config.pop("social_drive_modifiers", 0)
+
+            return lambda: MeltingpotFairLocalSVOEnv(
+                substrate=self.name.lower().replace('_flsvo', ''),
+                categorical_actions=True,
+                device=device,
+                group_map=MarlGroupMapType.ONE_GROUP_PER_AGENT,
+                svo_weight=svo_weight,
+                target_svos=target_svos,
+                svo_lambda=svo_lambda,
+                svo_gamma=svo_gamma,
+                social_drive_modifiers=social_drive_modifiers,
+                **config,
+            )
+        elif fair_local_ia:
+            ia_alpha = config.pop("ia_alpha", 0)
+            ia_beta = config.pop("ia_beta", 0)
+            ia_lambda = config.pop("ia_lambda", 0)
+            ia_gamma = config.pop("ia_gamma", 0)
+            social_drive_modifiers = config.pop("social_drive_modifiers", 0)
+
+            return lambda: MeltingpotFairLocalIAEnv(
+                substrate=self.name.lower().replace('_flia', ''),
+                categorical_actions=True,
+                device=device,
+                group_map=MarlGroupMapType.ONE_GROUP_PER_AGENT,
+                ia_alpha=ia_alpha,
+                ia_beta=ia_beta,
+                ia_lambda=ia_lambda,
+                ia_gamma=ia_gamma,
+                social_drive_modifiers=social_drive_modifiers,
+                **config,
+            )
+        return lambda: MeltingpotCustomEnv(
             substrate=self.name.lower(),
             categorical_actions=True,
             device=device,
+            group_map=MarlGroupMapType.ONE_GROUP_PER_AGENT,
             **config,
         )
 
@@ -76,14 +166,22 @@ class MeltingPotClass(TaskClass):
         )
 
     def get_replay_buffer_transforms(self, env: EnvBase, group: str) -> List[Transform]:
+        keys_to_exclude = []
+        for key in env.observation_spec.keys(True, True):
+            if "observation" in key and "RGB" not in key:
+                keys_to_exclude.append(key)
+                keys_to_exclude.append(("next", ) + key)
+
+        keys_to_exclude.append(('RGB'))
+        keys_to_exclude.append(('next', 'RGB'))
+
         return [
+            ExcludeTransform(*keys_to_exclude, inverse=True),
             DTypeCastTransform(
                 dtype_in=torch.uint8,
                 dtype_out=torch.float,
                 in_keys=[
-                    "RGB",
                     (group, "observation", "RGB"),
-                    ("next", "RGB"),
                     ("next", group, "observation", "RGB"),
                 ],
                 in_keys_inv=[],
@@ -92,6 +190,11 @@ class MeltingPotClass(TaskClass):
 
     def state_spec(self, env: EnvBase) -> Optional[Composite]:
         observation_spec = env.observation_spec.clone()
+
+        keys_to_exclude = [key for key in observation_spec.keys(True, True) if "observation" in key and "RGB" not in key]
+        for key in keys_to_exclude:
+            del observation_spec[key]
+
         for group in self.group_map(env):
             del observation_spec[group]
         if list(observation_spec.keys()) != ["RGB"]:
@@ -105,6 +208,12 @@ class MeltingPotClass(TaskClass):
 
     def observation_spec(self, env: EnvBase) -> Composite:
         observation_spec = env.observation_spec.clone()
+
+        # keep only RGB as the observation key
+        keys_to_exclude = [key for key in observation_spec.keys(True, True) if "observation" in key and "RGB" not in key]
+        for key in keys_to_exclude:
+            del observation_spec[key]
+
         for group_key in list(observation_spec.keys()):
             if group_key not in self.group_map(env).keys():
                 del observation_spec[group_key]
@@ -184,6 +293,69 @@ class MeltingPotTask(Task):
     CHICKEN_IN_THE_MATRIX__ARENA = None
     BOAT_RACE__EIGHT_RACES = None
     EXTERNALITY_MUSHROOMS__DENSE = None
+
+    # Symmetric Harvest Env
+    ASYMMETRIC_COMMONS_HARVEST__DEFAULT = None
+
+    ASYMMETRIC_COMMONS_HARVEST__DEFAULT_IA = None
+    ASYMMETRIC_COMMONS_HARVEST__DEFAULT_SVO = None
+    ASYMMETRIC_COMMONS_HARVEST__DEFAULT_FLSVO = None
+    ASYMMETRIC_COMMONS_HARVEST__DEFAULT_FLIA = None
+
+    # Harvest with asymmetry in apple rewards
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_2COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_4COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_6COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_8COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_10COOP = None
+
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_IA = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_SVO = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_FLSVO = None
+    ASYMMETRIC_COMMONS_HARVEST__5HIGH_5LOW_REWARD_FLIA = None
+
+    # Harvest with asymmetry in zap radius
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_2COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_4COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_6COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_8COOP = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_10COOP = None
+
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_IA = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_SVO = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_FLIA = None
+    ASYMMETRIC_COMMONS_HARVEST__5STANDARD_5WIDE_ZAPPER_FLSVO = None
+
+    # Symmetric Coins Env
+    ASYMMETRIC_COINS__DEFAULT = None
+
+    ASYMMETRIC_COINS__DEFAULT_IA = None
+    ASYMMETRIC_COINS__DEFAULT_SVO = None
+
+    # Coins with asymmetry in coin rewards
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_HIGH_COOP = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_LOW_COOP = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_BOTH_COOP = None
+
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_IA = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_SVO = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_FLIA = None
+    ASYMMETRIC_COINS__1HIGH_1LOW_REWARD_FLSVO = None
+
+    # Coins with asymmetry in coin spawn
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_STANDARD_COOP = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_SPAWN_BIASED_COOP = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_BOTH_COOP = None
+
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_IA = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_SVO = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_FLIA = None
+    ASYMMETRIC_COINS__1STANDARD_1SPAWN_BIASED_FLSVO = None
+
 
     @staticmethod
     def associated_class():

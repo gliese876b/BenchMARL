@@ -129,15 +129,11 @@ class Plotting:
     METRIC_TO_PLOT = "return"
 
     @staticmethod
-    def process_data(
-        raw_data: Dict,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-    ) -> Dict:
+    def process_data(raw_data: Dict) -> Dict:
         """Call ``data_process_pipeline`` to normalize the chosen metrics and to clean the data
 
         Args:
             raw_data (dict): the input data
-            metrics_to_normalize (optional, List[str]): the list of metrics to normalize
 
         Returns:
             the processed dict
@@ -145,20 +141,15 @@ class Plotting:
         """
 
         return data_process_pipeline(
-            raw_data=raw_data,
-            metrics_to_normalize=metrics_to_normalize,
+            raw_data=raw_data, metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE
         )
 
     @staticmethod
-    def create_matrices(
-        processed_data,
-        env_name: str,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-    ):
+    def create_matrices(processed_data, env_name: str):
         return create_matrices_for_rliable(
             data_dictionary=processed_data,
             environment_name=env_name,
-            metrics_to_normalize=metrics_to_normalize,
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
         )
 
     ############################
@@ -166,63 +157,39 @@ class Plotting:
     ############################
 
     @staticmethod
-    def performance_profile_figure(
-        environment_comparison_matrix,
-        metric_name: Optional[str] = METRIC_TO_PLOT,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-        **kwargs
-    ):
+    def performance_profile_figure(environment_comparison_matrix):
         return performance_profiles(
             environment_comparison_matrix,
-            metric_name=metric_name,
-            metrics_to_normalize=metrics_to_normalize,
-            **kwargs,
+            metric_name=Plotting.METRIC_TO_PLOT,
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
         )
 
     @staticmethod
-    def aggregate_scores(
-        environment_comparison_matrix,
-        metric_name: Optional[str] = METRIC_TO_PLOT,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-        save_tabular_as_latex: bool = True,
-        **kwargs
-    ):
+    def aggregate_scores(environment_comparison_matrix):
         return aggregate_scores(
             dictionary=environment_comparison_matrix,
-            metric_name=metric_name,
-            metrics_to_normalize=metrics_to_normalize,
-            save_tabular_as_latex=save_tabular_as_latex,
-            **kwargs,
+            metric_name=Plotting.METRIC_TO_PLOT,
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
+            save_tabular_as_latex=True,
         )
 
     @staticmethod
     def probability_of_improvement(
-        environment_comparison_matrix,
-        algorithms_to_compare: List[List[str]],
-        metric_name: Optional[str] = METRIC_TO_PLOT,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-        **kwargs
+        environment_comparison_matrix, algorithms_to_compare: List[List[str]]
     ):
         return probability_of_improvement(
             environment_comparison_matrix,
+            metric_name=Plotting.METRIC_TO_PLOT,
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
             algorithms_to_compare=algorithms_to_compare,
-            metric_name=metric_name,
-            metrics_to_normalize=metrics_to_normalize,
-            **kwargs,
         )
 
     @staticmethod
-    def environemnt_sample_efficiency_curves(
-        sample_effeciency_matrix,
-        metric_name: Optional[str] = METRIC_TO_PLOT,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-        **kwargs
-    ):
+    def environemnt_sample_efficiency_curves(sample_effeciency_matrix):
         return sample_efficiency_curves(
             dictionary=sample_effeciency_matrix,
-            metric_name=metric_name,
-            metrics_to_normalize=metrics_to_normalize,
-            **kwargs,
+            metric_name=Plotting.METRIC_TO_PLOT,
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
         )
 
     ############################
@@ -230,21 +197,13 @@ class Plotting:
     ############################
 
     @staticmethod
-    def task_sample_efficiency_curves(
-        processed_data,
-        task,
-        env,
-        metric_name: Optional[str] = METRIC_TO_PLOT,
-        metrics_to_normalize: Optional[List[str]] = METRICS_TO_NORMALIZE,
-        **kwargs
-    ):
+    def task_sample_efficiency_curves(processed_data, task, env):
         return plot_single_task(
             processed_data=processed_data,
             environment_name=env,
             task_name=task,
-            metric_name=metric_name,
-            metrics_to_normalize=metrics_to_normalize,
-            **kwargs,
+            metric_name="return",
+            metrics_to_normalize=Plotting.METRICS_TO_NORMALIZE,
         )
 
 
